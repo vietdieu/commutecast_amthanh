@@ -809,24 +809,98 @@ interface PublishedEpisode {
   duration: number;
 }
 
-function loadPublishedEpisodes(): PublishedEpisode[] {
+let cachedEpisodesInMem: PublishedEpisode[] | null = null;
+let syncLoadedFromSupabase = false;
+
+async function loadPublishedEpisodesFromSupabaseAsync(): Promise<PublishedEpisode[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
   try {
-    if (fs.existsSync(PODCASTS_JSON_PATH)) {
-      const data = fs.readFileSync(PODCASTS_JSON_PATH, "utf8");
-      return JSON.parse(data);
+    const { data, error } = await supabase.storage
+      .from("podcast-audio")
+      .download("metadata/published-podcasts.json");
+    if (!error && data) {
+      const text = await data.text();
+      const eps = JSON.parse(text);
+      if (Array.isArray(eps)) {
+        console.log("[Podcast - Supabase] Successfully fetched published episodes from Supabase Storage.");
+        try {
+          fs.writeFileSync(PODCASTS_JSON_PATH, JSON.stringify(eps, null, 2), "utf8");
+        } catch (localWriteErr) {
+          // ignore
+        }
+        cachedEpisodesInMem = eps;
+        return eps;
+      }
+    } else if (error) {
+      console.log("[Podcast - Supabase] Fetch metadata warning (might be first run / bucket empty):", error.message || error);
     }
-  } catch (err) {
-    console.error("Failed to load published episodes:", err);
+  } catch (err: any) {
+    console.error("[Podcast - Supabase] Failed to download metadata from Supabase:", err.message || err);
   }
   return [];
 }
 
+async function savePublishedEpisodesToSupabaseAsync(episodes: PublishedEpisode[]) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const jsonStr = JSON.stringify(episodes, null, 2);
+    const fileBuffer = Buffer.from(jsonStr, "utf8");
+    
+    console.log("[Podcast - Supabase] Uploading fresh metadata to Supabase Storage...");
+    const { error } = await supabase.storage
+      .from("podcast-audio")
+      .upload("metadata/published-podcasts.json", fileBuffer, {
+        contentType: "application/json",
+        upsert: true,
+      });
+
+    if (error) {
+      console.error("[Podcast - Supabase] Failed to upload metadata to Supabase Storage:", error.message || error);
+    } else {
+      console.log("[Podcast - Supabase] Metadata synchronized to Supabase Cloud Storage.");
+    }
+  } catch (err: any) {
+    console.error("[Podcast - Supabase] Unexpected error uploading metadata:", err.message || err);
+  }
+}
+
+function loadPublishedEpisodes(): PublishedEpisode[] {
+  if (cachedEpisodesInMem) {
+    return cachedEpisodesInMem;
+  }
+  
+  let localEps: PublishedEpisode[] = [];
+  try {
+    if (fs.existsSync(PODCASTS_JSON_PATH)) {
+      const data = fs.readFileSync(PODCASTS_JSON_PATH, "utf8");
+      localEps = JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Failed to load local published episodes:", err);
+  }
+
+  if (!syncLoadedFromSupabase) {
+    syncLoadedFromSupabase = true;
+    loadPublishedEpisodesFromSupabaseAsync().then((cloudEps) => {
+      if (cloudEps && cloudEps.length > 0) {
+        cachedEpisodesInMem = cloudEps;
+      }
+    });
+  }
+
+  return localEps.length > 0 ? localEps : (cachedEpisodesInMem || []);
+}
+
 function savePublishedEpisodes(episodes: PublishedEpisode[]) {
+  cachedEpisodesInMem = episodes;
   try {
     fs.writeFileSync(PODCASTS_JSON_PATH, JSON.stringify(episodes, null, 2), "utf8");
   } catch (err) {
-    console.error("Failed to save published episodes:", err);
+    console.error("Failed to save published episodes locally:", err);
   }
+  savePublishedEpisodesToSupabaseAsync(episodes);
 }
 
 // Lazy GCS client initializer & helper

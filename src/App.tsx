@@ -28,6 +28,17 @@ import { SummaryPreferences, SavedSummary, SummaryPayload } from "./types";
 import { SAMPLE_ARTICLES_PRESETS } from "./utils";
 import ManualPcmPlayer from "./components/ManualPcmPlayer";
 
+// Helper to construct fully qualified API URL on production
+export const getApiUrl = (endpoint: string): string => {
+  const envApiUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envApiUrl) {
+    const base = envApiUrl.endsWith("/") ? envApiUrl.slice(0, -1) : envApiUrl;
+    const formattedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    return `${base}${formattedEndpoint}`;
+  }
+  return endpoint;
+};
+
 // Translation Dictionary for English and Vietnamese interface
 const translations = {
   vi: {
@@ -303,9 +314,21 @@ export default function App() {
   const [isPublishingPodcast, setIsPublishingPodcast] = useState<boolean>(false);
   const [podcastError, setPodcastError] = useState<string>("");
 
+  const getPublicRssUrl = (): string => {
+    const apiPath = getApiUrl("/api/podcast/feed");
+    if (apiPath.startsWith("http")) {
+      return apiPath;
+    }
+    if (typeof window !== "undefined") {
+      return `${window.location.protocol}//${window.location.host}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`;
+    }
+    return "/api/podcast/feed";
+  };
+  const absoluteRssUrl = getPublicRssUrl();
+
   const loadPodcastEpisodes = async () => {
     try {
-      const res = await fetch("/api/podcast/episodes");
+      const res = await fetch(getApiUrl("/api/podcast/episodes"));
       if (res.ok) {
         const data = await res.json();
         setPodcastEpisodes(data || []);
@@ -335,7 +358,7 @@ export default function App() {
     setPodcastError("");
 
     try {
-      const res = await fetch("/api/podcast/publish", {
+      const res = await fetch(getApiUrl("/api/podcast/publish"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -385,7 +408,7 @@ export default function App() {
     if (!confirmation) return;
 
     try {
-      const res = await fetch(`/api/podcast/episodes/${id}`, {
+      const res = await fetch(getApiUrl(`/api/podcast/episodes/${id}`), {
         method: "DELETE"
       });
 
@@ -503,7 +526,7 @@ export default function App() {
     try {
       setIsGeneratingNews(true);
       setNewsGenerationError("");
-      const res = await fetch("/api/generate-news", {
+      const res = await fetch(getApiUrl("/api/generate-news"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -601,7 +624,7 @@ export default function App() {
           setIsProcessingVoiceQuery(true);
           setVoiceQueryStatus(t.queryProcessing);
           
-          const response = await fetch("/api/voice-query", {
+          const response = await fetch(getApiUrl("/api/voice-query"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -667,7 +690,7 @@ export default function App() {
       setGenerationProgress(t.progressStep1);
 
       // Step 1: Query API to draft summary script
-      const summaryRes = await fetch("/api/summarize", {
+      const summaryRes = await fetch(getApiUrl("/api/summarize"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -734,7 +757,7 @@ export default function App() {
         
         setGenerationProgress(displayLabel);
 
-        const ttsRes = await fetch("/api/tts", {
+        const ttsRes = await fetch(getApiUrl("/api/tts"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1544,15 +1567,14 @@ export default function App() {
             {/* RSS Link and copy control badge */}
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 font-mono text-[11px] text-slate-600">
               <span className="truncate select-all bg-white px-2 py-1 rounded border border-slate-200 flex-1 text-left">
-                {typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}/api/podcast/feed` : "/api/podcast/feed"}
+                {absoluteRssUrl}
               </span>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
-                    const rssUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}/api/podcast/feed` : "";
-                    if (rssUrl) {
-                      navigator.clipboard.writeText(rssUrl);
+                    if (absoluteRssUrl) {
+                      navigator.clipboard.writeText(absoluteRssUrl);
                       alert(t.podcastCopySuccess);
                     }
                   }}
@@ -1562,7 +1584,7 @@ export default function App() {
                   <span className="text-[10px]">Copy</span>
                 </button>
                 <a
-                  href="/api/podcast/feed"
+                  href={absoluteRssUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="p-1.5 hover:bg-slate-200 text-slate-500 hover:text-slate-800 rounded-lg transition-all"
