@@ -1,0 +1,8 @@
+{
+  "name": "Commute News Audio Summarizer",
+  "description": "Create personalized daily news summaries from articles and convert them to speech for your daily commute.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
