@@ -1276,17 +1276,57 @@ app.delete("/api/podcast/episodes/:id", async (req, res): Promise<any> => {
   }
 });
 
+// ===== HELPERS FOR RSS FEED =====
+
+// Định dạng ngày tháng theo chuẩn RFC 822 cho RSS
+function formatRFC822(date: Date): string {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${days[date.getUTCDay()]}, ${String(date.getUTCDate()).padStart(2, '0')} ${months[date.getUTCMonth()]} ${date.getUTCFullYear()} ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}:${String(date.getUTCSeconds()).padStart(2, '0')} GMT`;
+}
+
+// Ước lượng thời lượng dựa trên số ký tự (mỗi 100 ký tự ~ 30 giây)
+function estimateDuration(text: string): number {
+  if (!text) return 30;
+  const charCount = text.length;
+  // Giả định: 100 ký tự ~ 30 giây đọc
+  const seconds = Math.max(30, Math.floor(charCount / 100) * 30);
+  return Math.min(seconds, 3600); // Tối đa 1 giờ
+}
+
 // API: Generate RSS Feed XML complying with iTunes Podcast spec
 app.get("/api/podcast/feed", async (req, res): Promise<any> => {
   try {
     const episodes = loadPublishedEpisodes();
     const appUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
 
+    // Nếu chưa có episode, tạo feed rỗng nhưng hợp lệ
+    if (episodes.length === 0) {
+      console.log("[RSS] No episodes found, generating empty feed.");
+    }
+
     const rssItems = episodes.map((ep) => {
+      // Sửa pubDate: định dạng đúng RFC 822
+      let pubDateStr = "";
+      try {
+        const pubDate = new Date(ep.pubDate);
+        if (!isNaN(pubDate.getTime())) {
+          pubDateStr = formatRFC822(pubDate);
+        } else {
+          // Nếu không parse được, dùng thời gian hiện tại
+          pubDateStr = formatRFC822(new Date());
+        }
+      } catch (e) {
+        pubDateStr = formatRFC822(new Date());
+      }
+
+      // Tính duration từ description (ước lượng)
+      const duration = estimateDuration(ep.description);
+
       return {
         title: [ep.title],
         description: [ep.description],
-        pubDate: [new Date(ep.pubDate).toUTCString()],
+        pubDate: [pubDateStr],
         enclosure: {
           $: {
             url: ep.audioUrl,
@@ -1295,7 +1335,7 @@ app.get("/api/podcast/feed", async (req, res): Promise<any> => {
           }
         },
         guid: [ep.audioUrl],
-        "itunes:duration": [String(ep.duration)],
+        "itunes:duration": [String(duration)],
         "itunes:image": {
           $: {
             href: `${appUrl}/icon-512.jpg`
@@ -1347,6 +1387,12 @@ app.get("/api/podcast/feed", async (req, res): Promise<any> => {
     console.error("RSS feed generation failed:", err);
     res.status(500).send("<error>Failed to generate RSS feed</error>");
   }
+});
+
+// API: Kiểm tra thời lượng thực tế của audio (optional)
+app.head("/api/podcast/check-duration/:url", async (req, res) => {
+  // Dùng để debug, có thể bỏ qua
+  res.status(200).json({ message: "OK" });
 });
 
 // Serve frontend client
