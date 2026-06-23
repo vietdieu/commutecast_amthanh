@@ -1276,6 +1276,36 @@ app.delete("/api/podcast/episodes/:id", async (req, res): Promise<any> => {
   }
 });
 
+// Helper to parse dates safely of various locale styles (Vietnamese/US) and return valid UTC string
+function safeToUTCString(dateStr: string): string {
+  if (!dateStr) return new Date().toUTCString();
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    return d.toUTCString();
+  }
+  
+  // Custom parsing for DD/MM/YYYY HH:MM:SS format
+  try {
+    const match = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})([,\s]+(\d{1,2}):(\d{1,2})(:(\d{1,2}))?)?/);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const year = parseInt(match[3], 10);
+      const hour = match[5] ? parseInt(match[5], 10) : 0;
+      const minute = match[6] ? parseInt(match[6], 10) : 0;
+      const second = match[8] ? parseInt(match[8], 10) : 0;
+      const customDate = new Date(Date.UTC(year, month, day, hour, minute, second));
+      if (!isNaN(customDate.getTime())) {
+        return customDate.toUTCString();
+      }
+    }
+  } catch (err) {
+    // fallback below
+  }
+
+  return new Date().toUTCString();
+}
+
 // API: Generate RSS Feed XML complying with iTunes Podcast spec
 app.get("/api/podcast/feed", async (req, res): Promise<any> => {
   try {
@@ -1286,7 +1316,7 @@ app.get("/api/podcast/feed", async (req, res): Promise<any> => {
       return {
         title: [ep.title],
         description: [ep.description],
-        pubDate: [new Date(ep.pubDate).toUTCString()],
+        pubDate: [safeToUTCString(ep.pubDate)],
         enclosure: {
           $: {
             url: ep.audioUrl,
