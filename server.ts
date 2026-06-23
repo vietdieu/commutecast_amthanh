@@ -1371,3 +1371,4 @@ async function serveApp() {
     console.log(`[CommuteCast Backend] running on http://localhost:${PORT}`);
   });
 }
+serveApp();
